@@ -12,7 +12,8 @@
     "seo",
     "google search console"
   ],
-  "author": "Your Name",
+  "author": "Silvan Hagen",
+  "repository": "https://github.com/neverything/ghost-api-scripts",
   "license": "MIT",
   "dependencies": {
     "@tryghost/admin-api": "^1.13.4",

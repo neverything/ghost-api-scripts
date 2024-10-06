@@ -65,4 +65,4 @@ Thumbs.db
 .vscode/*
 
 # Output CSV files (uncomment if you don't want to track these)
-# *.csv
+*.csv

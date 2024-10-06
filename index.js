@@ -7,6 +7,7 @@ const csv = require('csv-writer').createObjectCsvWriter;
 const { program } = require('commander');
 const readline = require('readline');
 const fs = require('fs').promises;
+const path = require('path');
 
 // Configuration from environment variables
 const GHOST_API_URL = process.env.GHOST_API_URL;
@@ -18,7 +19,7 @@ const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 program
   .version('1.0.0')
   .option('-l, --limit <number>', 'Number of posts to process per request', parseInt)
-  .option('-o, --output <filename>', 'Output CSV filename', 'post_update_results.csv')
+  .option('-o, --output <filename>', 'Output CSV filename prefix', 'post_update_results')
   .parse(process.argv);
 
 const options = program.opts();
@@ -153,83 +154,97 @@ async function reindexPost(url) {
   }
 }
 
-async function processAllPosts() {
-  const results = [];
-  const limit = options.limit || 15;
-  let page = 1;
-
-  while (true) {
-    try {
-      const posts = await api.posts.browse({
-        limit: limit,
-        page: page,
-        filter: 'status:published'
-      });
-
-      if (posts.length === 0) {
+async function writeResultsToCsv(results, filename) {
+    const csvWriter = csv({
+      path: filename,
+      header: [
+        { id: 'id', title: 'Post ID' },
+        { id: 'title', title: 'Title' },
+        { id: 'excerptCopied', title: 'Excerpt Copied to Meta Description' },
+        { id: 'madePublic', title: 'Made Public' },
+        { id: 'updated', title: 'Updated' },
+        { id: 'reindexed', title: 'Reindexed' },
+        { id: 'error', title: 'Error' }
+      ],
+    });
+  
+    await csvWriter.writeRecords(results);
+    console.log(`Results written to ${filename}`);
+  }
+  
+  async function processAllPosts() {
+    const results = [];
+    const limit = options.limit || 15;
+    let page = 1;
+    let batchNumber = 1;
+  
+    while (true) {
+      try {
+        const posts = await api.posts.browse({
+          limit: limit,
+          page: page,
+          filter: 'status:published'
+        });
+  
+        if (posts.length === 0) {
+          break;
+        }
+  
+        for (const post of posts) {
+          console.log(`Processing post: ${post.title}`);
+  
+          const { post: updatedPost, updated, error } = await updatePost(post);
+          if (!updatedPost) {
+            console.log(`Skipping post ${post.id} due to processing error.`);
+            continue;
+          }
+  
+          const reindexed = updated ? await reindexPost(updatedPost.url) : false;
+  
+          results.push({
+            id: post.id,
+            title: post.title,
+            excerptCopied: (post.meta_description || '') !== (updatedPost.meta_description || ''),
+            madePublic: updatedPost.visibility === 'public' && post.visibility !== 'public',
+            updated: updated,
+            reindexed: reindexed,
+            error: error || ''
+          });
+  
+          // Write CSV for every 20 posts
+          if (results.length % 20 === 0) {
+            const filename = `${options.output}_batch${batchNumber}.csv`;
+            await writeResultsToCsv(results.slice(-20), filename);
+            batchNumber++;
+          }
+        }
+  
+        page++;
+      } catch (error) {
+        console.error('Error fetching posts:', error.message);
         break;
       }
-
-      for (const post of posts) {
-        console.log(`Processing post: ${post.title}`);
-
-        const { post: updatedPost, updated, error } = await updatePost(post);
-        if (!updatedPost) {
-          console.log(`Skipping post ${post.id} due to processing error.`);
-          continue;
-        }
-
-        const reindexed = updated ? await reindexPost(updatedPost.url) : false;
-
-        results.push({
-          id: post.id,
-          title: post.title,
-          excerptCopied: (post.meta_description || '') !== (updatedPost.meta_description || ''),
-          madePublic: updatedPost.visibility === 'public' && post.visibility !== 'public',
-          updated: updated,
-          reindexed: reindexed,
-          error: error || ''
-        });
-      }
-
-      page++;
+    }
+  
+    // Write any remaining results
+    if (results.length % 20 !== 0) {
+      const filename = `${options.output}_batch${batchNumber}.csv`;
+      await writeResultsToCsv(results.slice(-(results.length % 20)), filename);
+    }
+  
+    return results;
+  }
+  
+  async function main() {
+    try {
+      await getGoogleAuth();
+      const results = await processAllPosts();
+      console.log(`Total posts processed: ${results.length}`);
     } catch (error) {
-      console.error('Error fetching posts:', error.message);
-      break;
+      console.error('An error occurred:', error.message);
+    } finally {
+      rl.close();
     }
   }
-
-  return results;
-}
-
-async function writeResultsToCsv(results, filename) {
-  const csvWriter = csv({
-    path: filename,
-    header: [
-      { id: 'id', title: 'Post ID' },
-      { id: 'title', title: 'Title' },
-      { id: 'excerptCopied', title: 'Excerpt Copied to Meta Description' },
-      { id: 'madePublic', title: 'Made Public' },
-      { id: 'updated', title: 'Updated' },
-      { id: 'reindexed', title: 'Reindexed' },
-      { id: 'error', title: 'Error' }
-    ],
-  });
-
-  await csvWriter.writeRecords(results);
-  console.log(`Results written to ${filename}`);
-}
-
-async function main() {
-  try {
-    await getGoogleAuth();
-    const results = await processAllPosts();
-    await writeResultsToCsv(results, options.output);
-  } catch (error) {
-    console.error('An error occurred:', error.message);
-  } finally {
-    rl.close();
-  }
-}
-
-main();
+  
+  main();

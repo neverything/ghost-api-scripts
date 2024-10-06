@@ -9,6 +9,11 @@ This CLI tool updates Ghost blog posts and reindexes them in Google Search Conso
 5. Sends each post URL to Google Search Console for reindexing
 6. Writes a CSV file with the results of each operation
 
+## Info
+
+- You will reach a rate limit on Google after about 150 posts (per day)
+- You will reach a rate limit on Ghost if do too many requests
+
 ## Prerequisites
 
 - Node.js (v14 or later recommended)
