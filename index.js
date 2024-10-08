@@ -20,6 +20,13 @@ program
   .version('1.0.0')
   .option('-l, --limit <number>', 'Number of posts to process per request', parseInt)
   .option('-o, --output <filename>', 'Output CSV filename prefix', 'post_update_results')
+  .option('-r, --reindex <bool>', 'Reindex posts on Google', (val) => {
+    return val === 'true' || val === true || val === '';
+  }, true)
+  .option('-d, --date <date>', 'Posts older than <date> (YYYY-MM-DD)', (val) => {
+    const date = val ? new Date(val) : new Date();
+    return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+  }, new Date().toISOString().split('T')[0]) // Default to today's date
   .parse(process.argv);
 
 const options = program.opts();
@@ -139,6 +146,7 @@ async function updatePost(post) {
 }
 
 async function reindexPost(url) {
+  if (! options.reindex) return false;
   try {
     const indexing = google.indexing({ version: 'v3', auth: oauth2Client });
     await indexing.urlNotifications.publish({
@@ -147,6 +155,7 @@ async function reindexPost(url) {
         type: 'URL_UPDATED'
       }
     });
+    console.log(`Reindexing post ${url}\n`);
     return true;
   } catch (error) {
     console.error(`Error reindexing post ${url}:`, error.message);
@@ -169,7 +178,7 @@ async function writeResultsToCsv(results, filename) {
     });
   
     await csvWriter.writeRecords(results);
-    console.log(`Results written to ${filename}`);
+    console.log(`Results written to ${filename}\n`);
   }
   
   async function processAllPosts() {
@@ -183,7 +192,7 @@ async function writeResultsToCsv(results, filename) {
         const posts = await api.posts.browse({
           limit: limit,
           page: page,
-          filter: 'status:published'
+          filter: 'status:published+published_at:<' + options.date
         });
   
         if (posts.length === 0) {
@@ -236,10 +245,11 @@ async function writeResultsToCsv(results, filename) {
   }
   
   async function main() {
+    console.log(`Reindexing is ${options.reindex ? 'enabled' : 'disabled'}`);
     try {
-      await getGoogleAuth();
+      if (options.reindex) { await getGoogleAuth() };
       const results = await processAllPosts();
-      console.log(`Total posts processed: ${results.length}`);
+      console.log(`Total posts processed: ${results.length}\n`);
     } catch (error) {
       console.error('An error occurred:', error.message);
     } finally {
